@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Database
+data/*.db
+data/backups/
+data/cache/
+
+# Runtime generated
+output/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+*.key
+
+# Claude Code local config
+.claude/
