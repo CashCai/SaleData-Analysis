@@ -83,3 +83,21 @@ h1, h2, h3 {
 div.stAlert {
     border-radius: 8px;
 }
+
+/* ─── 文件上传器中文化 ──────────────────────── */
+/* 隐藏 "Drag and drop file here" */
+div[data-testid="stFileDropzoneInput"] > div:first-child {
+    display: none;
+}
+/* 替换 "Browse files" → "浏览文件" */
+div[data-testid="stFileDropzone"] button {
+    font-size: 0;
+}
+div[data-testid="stFileDropzone"] button::before {
+    content: "浏览文件";
+    font-size: 14px;
+}
+/* 隐藏 "Limit 200MB per file" */
+div[data-testid="stFileDropzone"] small {
+    display: none;
+}

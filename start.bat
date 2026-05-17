@@ -1,35 +1,29 @@
 @echo off
 chcp 65001 >nul
-title ¼ÒµçÏúÊÛÊı¾İ¿ÉÊÓ»¯¿´°å
+title å®¶ç”µé”€å”®æ•°æ®å¯è§†åŒ–çœ‹æ¿
 
 echo ===================================
-echo   ¼ÒµçÏúÊÛÊı¾İ¿ÉÊÓ»¯¿´°å
+echo   å®¶ç”µé”€å”®æ•°æ®å¯è§†åŒ–çœ‹æ¿
 echo ===================================
 echo.
 
-:: ¼ì²é Python ÊÇ·ñ°²×°
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [´íÎó] Î´¼ì²âµ½ Python£¬ÇëÏÈ°²×° Python 3.8+
-    echo ÏÂÔØµØÖ·£ºhttps://www.python.org/downloads/
+set "BASE_DIR=%~dp0"
+set "PYTHON_DIR=%BASE_DIR%portable\python"
+
+:: æ£€æŸ¥ä¾¿æºç‰ˆ Python æ˜¯å¦å­˜åœ¨
+if not exist "%PYTHON_DIR%\python.exe" (
+    echo [é”™è¯¯] ä¾¿æºç‰ˆ Python ä¸å­˜åœ¨æˆ–å·²æŸå
+    echo è¯·ç¡®ä¿ portable\python\ ç›®å½•å®Œæ•´
     pause
     exit /b 1
 )
 
-:: ´´½¨ĞéÄâ»·¾³£¨Ê×´ÎÔËĞĞ£©
-if not exist "venv\" (
-    echo [Ê×´ÎÔËĞĞ] ÕıÔÚ´´½¨ĞéÄâ»·¾³...
-    python -m venv venv
-    echo [½ø¶È] ÕıÔÚ°²×°ÒÀÀµ°ü...
-    call venv\Scripts\activate.bat
-    pip install -r requirements.txt
-) else (
-    call venv\Scripts\activate.bat
-)
+:: ç¡®ä¿ data ç›®å½•å­˜åœ¨
+if not exist "%BASE_DIR%data" mkdir "%BASE_DIR%data"
 
-:: Æô¶¯Ó¦ÓÃ
-echo [Æô¶¯] ÕıÔÚÆô¶¯¿´°å...
+:: å¯åŠ¨åº”ç”¨
+echo [å¯åŠ¨] æ­£åœ¨å¯åŠ¨çœ‹æ¿...
 start http://localhost:8501
-python -m streamlit run main.py
+"%PYTHON_DIR%\python.exe" -m streamlit run "%BASE_DIR%main.py"
 
 pause

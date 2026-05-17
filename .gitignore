@@ -26,3 +26,13 @@ Thumbs.db
 
 # Claude Code local config
 .claude/
+
+# Portable build output
+portable/
+
+# Debug / test utilities
+debug_*.py
+test_*.py
+check_data.py
+verify_fix.py
+tile_proxy.py

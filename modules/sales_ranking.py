@@ -5,6 +5,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from config import PLOTLY_CONFIG
 
 
 def generate_ranking(df: pd.DataFrame, group_by: str = "brand",
@@ -17,16 +18,21 @@ def generate_ranking(df: pd.DataFrame, group_by: str = "brand",
     if group_by not in df.columns:
         return pd.DataFrame()
 
-    agg_dict = {"amount": "sum", "order_id": "count"}
+    agg_dict = {"amount": "sum"}
     if "quantity" in df.columns:
         agg_dict["quantity"] = "sum"
 
+    # 先取最大的 N 个，保持降序排序（热销在前，用于表格显示）
     ranking = df.groupby(group_by).agg(agg_dict).sort_values(sort_by, ascending=False)
     ranking = ranking.head(top_n).reset_index()
 
-    col_map = {group_by: "维度", "amount": "销售额", "order_id": "订单数", "quantity": "销量"}
+    col_map = {group_by: "维度", "amount": "销售额", "quantity": "销量"}
     ranking = ranking.rename(columns=col_map)
-    ranking["销售额占比"] = (ranking["销售额"] / ranking["销售额"].sum() * 100).round(1)
+
+    # 占比按排序指标计算
+    metric_col = "销售额" if sort_by == "amount" else "销量"
+    total_all = ranking[metric_col].sum()
+    ranking["占比显示"] = (ranking[metric_col] / total_all * 100).round(1).apply(lambda x: f"{x}%")
     ranking["排名"] = range(1, len(ranking) + 1)
 
     # 热销标记（前 10%）
@@ -63,39 +69,47 @@ def render_ranking_ui(df: pd.DataFrame):
         return
 
     # 横向柱状图
+    x_col = "销售额" if sort_by == "amount" else "销量"
+    dim_label = {"category": "品类", "brand": "品牌", "model": "型号"}.get(group_by, group_by)
+
+    # 图表数据按升序排列，使最大的显示在最下面
+    chart_data = ranking.sort_values(x_col, ascending=True)
+
     fig = px.bar(
-        ranking,
-        x="销售额",
+        chart_data,
+        x=x_col,
         y="维度",
         orientation="h",
-        text="销售额占比",
-        color="销售额",
-        color_continuous_scale="Blues",
-        title=f"{['品类', '品牌', '型号'][['category', 'brand', 'model'].index(group_by)]} 销售排行 Top {top_n}",
-        custom_data=["排名", "订单数", "销量", "热销标记"],
+        text="占比显示",
+        title=f"{dim_label} 销售排行 Top {top_n}",
+        custom_data=["排名", "销售额", "销量", "热销标记"],
     )
 
     fig.update_traces(
-        texttemplate="%{text}%",
         textposition="outside",
+        marker_color="#1f77b4",
         hovertemplate=(
             "<b>%{y}</b><br>"
-            "销售额: ¥%{x:,.0f}<br>"
             "排名: #%{customdata[0]}<br>"
-            "订单数: %{customdata[1]}<br>"
-            "销量: %{customdata[2]}<br>"
+            "销售额: ¥%{customdata[1]:,.0f}<br>"
+            "销量: %{customdata[2]} 台<br>"
             "%{customdata[3]}"
+            "<extra></extra>"
         ),
     )
     fig.update_layout(
-        yaxis={"categoryorder": "total ascending"},
+        yaxis={"categoryorder": "array", "categoryarray": chart_data["维度"].tolist()},
+        xaxis_title=x_col,
         height=500,
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=40, t=40, b=10),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=f"rank_chart_{group_by}_{sort_by}_{top_n}")
 
     st.dataframe(
-        ranking[["排名", "维度", "销售额", "订单数", "销量", "销售额占比", "热销标记"]],
+        ranking[["排名", "维度", "销售额", "销量", "占比显示", "热销标记"]],
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "销售额": st.column_config.NumberColumn(format="¥%.2f"),
+        },
     )

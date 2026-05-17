@@ -46,6 +46,7 @@ def migrate_schema(cursor: sqlite3.Cursor):
         "order_id", "customer_name", "customer_phone", "product_name",
         "category", "brand", "model", "quantity", "amount", "subsidy_amount",
         "subsidy_status", "sale_date", "channel", "address", "geo_code",
+        "latitude", "longitude",
     ]
     try:
         existing = {
@@ -54,10 +55,18 @@ def migrate_schema(cursor: sqlite3.Cursor):
         }
         missing = [c for c in expected_cols if c not in existing]
         if missing:
-            # 重建 sales_orders 表（数据在下次导入时会重新写入）
-            cursor.execute("DROP TABLE IF EXISTS sales_orders")
-            from database.models import CREATE_SALES_ORDERS
-            cursor.execute(CREATE_SALES_ORDERS)
+            # 逐列添加，不破坏已有数据
+            col_types = {
+                "latitude": "REAL", "longitude": "REAL",
+                "quantity": "INTEGER", "amount": "REAL",
+                "subsidy_amount": "REAL",
+            }
+            for col in missing:
+                col_type = col_types.get(col, "TEXT")
+                try:
+                    cursor.execute(f"ALTER TABLE sales_orders ADD COLUMN {col} {col_type}")
+                except sqlite3.OperationalError:
+                    pass
     except sqlite3.OperationalError:
         pass
 
@@ -83,6 +92,17 @@ def read_all_orders() -> list[dict]:
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return rows
+
+
+def delete_orders_by_field(field: str, value: str):
+    """删除指定字段匹配的所有订单行（用于品类/品牌管理）"""
+    allowed = {"category", "brand"}
+    if field not in allowed:
+        raise ValueError(f"field must be one of {allowed}")
+    conn = get_connection()
+    conn.execute(f"DELETE FROM sales_orders WHERE {field} = ?", (value,))
+    conn.commit()
+    conn.close()
 
 
 def get_table_info() -> dict:

@@ -5,6 +5,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from config import PLOTLY_CONFIG
 
 
 def analyze_repeat_customers(df: pd.DataFrame) -> pd.DataFrame:
@@ -13,6 +14,7 @@ def analyze_repeat_customers(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     customer_stats = df.groupby("customer_phone").agg(
+        客户姓名=("customer_name", "first"),
         购买次数=("order_id", "count"),
         累计消费=("amount", "sum"),
         最早购买=("sale_date", "min"),
@@ -86,15 +88,17 @@ def render_repeat_customers_ui(df: pd.DataFrame):
         category_orders={"RFM分层": rfm_order},
     )
     fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-    st.plotly_chart(fig_pie, use_container_width=True)
+    st.plotly_chart(fig_pie, use_container_width=True, config=PLOTLY_CONFIG, key="rfm_pie_chart")
 
     # 客户列表
     st.write("**回购客户明细：**")
-    display_cols = ["customer_phone", "购买次数", "累计消费", "回购周期(天)", "RFM分层"]
+    display_cols = ["客户姓名", "customer_phone", "购买次数", "累计消费", "回购周期(天)", "RFM分层"]
     st.dataframe(
         result[display_cols],
         use_container_width=True,
         column_config={
+            "客户姓名": st.column_config.TextColumn("客户姓名"),
+            "customer_phone": st.column_config.TextColumn("客户电话"),
             "累计消费": st.column_config.NumberColumn(format="¥%.2f"),
         },
         hide_index=True,

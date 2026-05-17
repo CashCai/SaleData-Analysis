@@ -4,10 +4,12 @@
 
 import streamlit as st
 import pandas as pd
+import json
+import os
 from datetime import datetime
 
-from config import APP_TITLE, APP_ICON
-from database.db_manager import init_database, read_all_orders
+from config import APP_TITLE, APP_ICON, PLOTLY_CONFIG, FILTER_OVERRIDES_PATH
+from database.db_manager import init_database, read_all_orders, delete_orders_by_field
 from modules.data_import import run_import_ui, import_to_db, normalize_columns, clean_data, validate_data
 from modules.sales_ranking import render_ranking_ui
 from modules.repeat_customers import render_repeat_customers_ui
@@ -40,12 +42,42 @@ def init_session_state():
         st.session_state.show_import = False
 
 
+def load_filter_overrides():
+    """从 JSON 文件加载自定义品类/品牌到 session state"""
+    if os.path.exists(FILTER_OVERRIDES_PATH):
+        try:
+            with open(FILTER_OVERRIDES_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            st.session_state.custom_categories = data.get("custom_categories", [])
+            st.session_state.custom_brands = data.get("custom_brands", [])
+        except Exception:
+            st.session_state.custom_categories = []
+            st.session_state.custom_brands = []
+    else:
+        st.session_state.custom_categories = []
+        st.session_state.custom_brands = []
+
+
+def save_filter_overrides():
+    """将 session state 中的自定义品类/品牌写入 JSON 文件"""
+    data = {
+        "custom_categories": st.session_state.get("custom_categories", []),
+        "custom_brands": st.session_state.get("custom_brands", []),
+    }
+    os.makedirs(os.path.dirname(FILTER_OVERRIDES_PATH), exist_ok=True)
+    with open(FILTER_OVERRIDES_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def load_data_from_db():
     """从数据库加载数据到 session state"""
     rows = read_all_orders()
     if rows:
         df = pd.DataFrame(rows)
         df["sale_date"] = pd.to_datetime(df["sale_date"], errors="coerce")
+        # 确保amount列是数值类型
+        if "amount" in df.columns:
+            df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
         st.session_state.df = df
         st.session_state.data_loaded = True
     else:
@@ -58,6 +90,10 @@ init_database()
 # 自动加载已有数据
 if not st.session_state.data_loaded:
     load_data_from_db()
+
+# 加载自定义品类/品牌（每次启动都从文件读取，确保持久化）
+if "custom_categories" not in st.session_state:
+    load_filter_overrides()
 
 
 # ─── 筛选控件 ─────────────────────────────────────────────────────
@@ -85,6 +121,8 @@ def render_filters(df: pd.DataFrame) -> dict:
     # 品类（多选）
     if "category" in df.columns:
         categories = sorted(df["category"].dropna().unique())
+        extra_cats = st.session_state.get("custom_categories", [])
+        categories = sorted(set(categories + extra_cats))
         if len(categories) > 0:
             selected_cat = st.sidebar.multiselect(
                 "品类", categories, default=categories, key="filter_cat",
@@ -92,18 +130,58 @@ def render_filters(df: pd.DataFrame) -> dict:
             if selected_cat:
                 filters["categories"] = selected_cat
 
+        # 品类管理
+        with st.sidebar.expander("管理品类", expanded=False):
+            st.caption("添加或删除品类选项，删除会同时清除对应数据")
+            new_cat = st.text_input("添加品类", label_visibility="collapsed", placeholder="输入新品类名称", key="new_cat")
+            if st.button("添加", key="add_cat") and new_cat.strip():
+                custom = st.session_state.get("custom_categories", [])
+                if new_cat.strip() not in custom:
+                    st.session_state.custom_categories = custom + [new_cat.strip()]
+                    save_filter_overrides()
+                    st.rerun()
+
+            current_cats = sorted(df["category"].dropna().unique())
+            if current_cats:
+                del_cat = st.selectbox("选择要删除的品类", options=[""] + current_cats, key="del_cat")
+                if del_cat and st.button("删除该品类及数据", type="secondary", key="del_cat_btn"):
+                    delete_orders_by_field("category", del_cat)
+                    load_data_from_db()
+                    st.rerun()
+
     # 品牌（联动过滤）
     if "brand" in df.columns:
         brand_df = df
         if "categories" in filters:
             brand_df = brand_df[brand_df["category"].isin(filters["categories"])]
         brands = sorted(brand_df["brand"].dropna().unique())
+        extra_brands = st.session_state.get("custom_brands", [])
+        brands = sorted(set(brands + extra_brands))
         if len(brands) > 0:
             selected_brands = st.sidebar.multiselect(
                 "品牌", brands, default=brands, key="filter_brand",
             )
             if selected_brands:
                 filters["brands"] = selected_brands
+
+        # 品牌管理
+        with st.sidebar.expander("管理品牌", expanded=False):
+            st.caption("添加或删除品牌选项，删除会同时清除对应数据")
+            new_brand = st.text_input("添加品牌", label_visibility="collapsed", placeholder="输入新品牌名称", key="new_brand")
+            if st.button("添加", key="add_brand") and new_brand.strip():
+                custom = st.session_state.get("custom_brands", [])
+                if new_brand.strip() not in custom:
+                    st.session_state.custom_brands = custom + [new_brand.strip()]
+                    save_filter_overrides()
+                    st.rerun()
+
+            current_brands = sorted(df["brand"].dropna().unique())
+            if current_brands:
+                del_brand = st.selectbox("选择要删除的品牌", options=[""] + current_brands, key="del_brand")
+                if del_brand and st.button("删除该品牌及数据", type="secondary", key="del_brand_btn"):
+                    delete_orders_by_field("brand", del_brand)
+                    load_data_from_db()
+                    st.rerun()
 
     # 核销状态
     if "subsidy_status" in df.columns:
@@ -133,9 +211,9 @@ def apply_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if "date_end" in filters and "sale_date" in result.columns:
         result = result[result["sale_date"] <= pd.Timestamp(filters["date_end"])]
     if "categories" in filters and "category" in result.columns:
-        result = result[result["category"].isin(filters["categories"])]
+        result = result[result["category"].isin(filters["categories"]) | result["category"].isna()]
     if "brands" in filters and "brand" in result.columns:
-        result = result[result["brand"].isin(filters["brands"])]
+        result = result[result["brand"].isin(filters["brands"]) | result["brand"].isna()]
     if "subsidy_status" in filters and "subsidy_status" in result.columns:
         if filters["subsidy_status"] == "已逾期":
             today = pd.Timestamp.now().normalize()
@@ -182,50 +260,117 @@ def render_dashboard(df: pd.DataFrame):
 
     st.divider()
 
-    # 销售趋势图（按月聚合）
+    import plotly.graph_objects as go
+    import numpy as np
+
+    # 销售趋势图（按日聚合，完整日期轴）
     if "sale_date" in df.columns:
-        df_month = df.copy()
-        df_month["月份"] = df_month["sale_date"].dt.to_period("M").astype(str)
-        monthly = df_month.groupby("月份").agg(
+        df_daily = df.copy()
+        df_daily["日期"] = df_daily["sale_date"].dt.date
+        df_daily["amount"] = pd.to_numeric(df_daily["amount"], errors="coerce").fillna(0)
+        daily = df_daily.groupby("日期").agg(
             销售额=("amount", "sum"),
             订单数=("order_id", "count"),
-        ).reset_index().sort_values("月份")
+        ).reset_index()
 
-        import plotly.express as px
-        fig = px.line(
-            monthly, x="月份", y="销售额",
-            title="月度销售趋势",
-            markers=True,
-            line_shape="spline",
+        date_range = pd.date_range(
+            daily["日期"].min(), daily["日期"].max(), freq="D"
         )
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        full_calendar = pd.DataFrame({"日期": date_range.date})
+        daily = full_calendar.merge(daily, on="日期", how="left").fillna({"销售额": 0, "订单数": 0})
+        daily["销售额"] = pd.to_numeric(daily["销售额"], errors="coerce").fillna(0)
+
+        # 使用 plotly.graph_objects 重写趋势图
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=daily["日期"].astype(str).tolist(),
+            y=daily["销售额"].tolist(),
+            mode='lines+markers',
+            name='销售额',
+            line=dict(shape='spline', color='#1f77b4'),
+            marker=dict(color='#1f77b4', size=8)
+        ))
+        fig.update_layout(
+            title='每日销售趋势',
+            xaxis_title='日期',
+            yaxis_title='销售额',
+            height=400,
+            xaxis=dict(tickformat='%Y年%m月%d日'),
+            template='plotly_white'
+        )
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     # 两个并排图表
     col_left, col_right = st.columns(2)
 
+    # 品类分析
+    cat_data = pd.DataFrame()
+    if "category" in df.columns:
+        df_amount = df.copy()
+        df_amount["amount"] = pd.to_numeric(df_amount["amount"], errors="coerce").fillna(0)
+        cat_data = (
+            df_amount.dropna(subset=["category"])
+            .groupby("category")["amount"]
+            .sum()
+            .reset_index(name="销售额")
+        )
+        if not cat_data.empty:
+            cat_data["销售额"] = pd.to_numeric(cat_data["销售额"], errors="coerce").fillna(0)
+            total = cat_data["销售额"].sum()
+            cat_data["占比"] = (cat_data["销售额"] / total * 100).round(1)
+            cat_data["占比显示"] = cat_data["占比"].apply(lambda x: f"{x}%")
+            cat_data["销售额文本"] = cat_data["销售额"].apply(lambda x: f"¥{x:,.0f}")
+
     with col_left:
-        # 品类分布饼图
-        if "category" in df.columns:
-            cat_data = df.groupby("category").agg(销售额=("amount", "sum")).reset_index()
-            import plotly.express as px
-            fig = px.pie(cat_data, names="category", values="销售额", title="品类销售额分布")
-            fig.update_traces(textposition="inside", textinfo="percent+label")
-            st.plotly_chart(fig, use_container_width=True)
+        if cat_data.empty:
+            st.caption("暂无品类数据")
+        else:
+            # 使用 plotly.graph_objects 重写饼图
+            fig = go.Figure(data=[go.Pie(
+                labels=cat_data["category"].tolist(),
+                values=cat_data["销售额"].tolist(),
+                textposition='inside',
+                textinfo='percent+label',
+                hovertext=cat_data["销售额文本"].tolist(),
+                hovertemplate='<b>%{label}</b><br>销售额: %{hovertext}<extra></extra>',
+                marker=dict(colors=[
+                    '#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', 
+                    '#2ca02c', '#98df8a', '#d62728'
+                ])
+            )])
+            fig.update_layout(
+                title='品类销售额分布',
+                height=400,
+                template='plotly_white'
+            )
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     with col_right:
-        # 品牌 Top 10 柱状图
-        if "brand" in df.columns:
-            brand_data = df.groupby("brand").agg(销售额=("amount", "sum")).reset_index()
-            brand_top = brand_data.sort_values("销售额", ascending=False).head(10)
-            import plotly.express as px
-            fig = px.bar(
-                brand_top, x="销售额", y="brand", orientation="h",
-                title="品牌销售额 Top 10", color="销售额",
-                color_continuous_scale="Viridis",
+        if cat_data.empty:
+            st.caption("暂无品类数据")
+        else:
+            bar_data = cat_data.sort_values("销售额", ascending=True)
+            # 使用 plotly.graph_objects 重写条形图
+            fig = go.Figure(data=[go.Bar(
+                x=bar_data["销售额"].tolist(),
+                y=bar_data["category"].tolist(),
+                orientation='h',
+                text=bar_data["占比显示"].tolist(),
+                textposition='outside',
+                marker=dict(color='#1f77b4'),
+                hovertext=bar_data["销售额文本"].tolist(),
+                hovertemplate='<b>%{y}</b><br>销售额: %{hovertext}<br>占比: %{text}<extra></extra>'
+            )])
+            fig.update_layout(
+                title='品类销售额排行',
+                xaxis_title='销售额',
+                yaxis_title='品类',
+                height=400,
+                yaxis=dict(categoryorder='array', categoryarray=bar_data["category"].tolist()),
+                margin=dict(l=10, r=40, t=40, b=10),
+                template='plotly_white'
             )
-            fig.update_layout(yaxis={"categoryorder": "total ascending"}, height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
     render_export_button(df, key="export_dashboard")
 
@@ -276,7 +421,7 @@ def main():
     # ─── 导入数据界面 ──────────────────────────────
     if st.session_state.show_import:
         run_import_ui()
-        if st.button("返回看板", type="primary"):
+        if st.button("进入销售看板", type="primary"):
             st.session_state.show_import = False
             load_data_from_db()
             st.rerun()
@@ -297,7 +442,7 @@ def main():
         st.divider()
 
         st.markdown("### 导航")
-        pages = ["综合看板", "销售排行", "回购顾客分析", "国补核销预警", "销售热力图", "数据查看", "帮助"]
+        pages = ["综合看板", "热销品类排行", "回购顾客分析", "国补核销预警", "热门购货区域", "订单明细", "帮助"]
         page = st.radio("", pages, label_visibility="collapsed", key="nav_radio")
         st.session_state.page = page
 
@@ -313,7 +458,7 @@ def main():
 
     if page == "综合看板":
         render_dashboard(filtered_df)
-    elif page == "销售排行":
+    elif page == "热销品类排行":
         render_ranking_ui(filtered_df)
         render_export_button(filtered_df, key="export_ranking")
     elif page == "回购顾客分析":
@@ -322,10 +467,10 @@ def main():
     elif page == "国补核销预警":
         render_subsidy_alert_ui(filtered_df)
         render_export_button(filtered_df, key="export_subsidy")
-    elif page == "销售热力图":
+    elif page == "热门购货区域":
         render_heatmap_ui(filtered_df)
         render_export_button(filtered_df, key="export_heatmap")
-    elif page == "数据查看":
+    elif page == "订单明细":
         render_data_viewer(filtered_df)
         render_export_button(filtered_df, key="export_viewer")
     elif page == "帮助":

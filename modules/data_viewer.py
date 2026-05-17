@@ -80,6 +80,7 @@ def render_data_viewer(df: pd.DataFrame):
         use_container_width=True,
         hide_index=True,
         column_config={
+            "客户电话": st.column_config.TextColumn("客户电话"),
             "应付总额": st.column_config.NumberColumn(format="¥%.2f"),
             "国补金额": st.column_config.NumberColumn(format="¥%.2f"),
             "签单日期": st.column_config.DateColumn(format="YYYY-MM-DD"),

@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     sale_date       DATE,
     channel         TEXT,
     address         TEXT,
-    geo_code        TEXT
+    geo_code        TEXT,
+    latitude        REAL,
+    longitude       REAL
 );
 """
 
